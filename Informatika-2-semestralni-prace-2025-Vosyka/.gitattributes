@@ -1,0 +1,8 @@
+# Označit Python soubory pro GitHub Linguist
+*.py linguist-language=Python
+*.sql linguist-language=SQL
+
+# Ignorovat virtuální prostředí a cache při detekci jazyka
+.venv/** linguist-vendored
+__pycache__/** linguist-generated
+*.pyc linguist-generated
