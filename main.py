@@ -7,8 +7,7 @@ import calendar
 
 db.inicializuj_db()
 
-# --- Globální proměnné pro uchování otevřených oken ---
-otevena_detaily_okna = {}  # {vozidlo_id: okno}
+otevena_detaily_okna = {}
 otevena_servis_okna = {}   # {(vozidlo_id, komponenta): okno}
 aktualizuj_detaily_funkce = {}  # {vozidlo_id: aktualizuj_detaily_funkce}
 otevena_pridani_okna = None
@@ -19,9 +18,8 @@ aktualizuj_kalendar_funkce = None  # Funkce pro aktualizaci kalendáře
 # --- Filtr ---
 filtr_typ = "vše"
 filtr_stav = "vše"
-vsechna_vozidla = []  # Uložení všech vozidel
+vsechna_vozidla = []
 
-# --- Cache pro stavy vozidel ---
 _cache_stavy_vozidel = {}
 _cache_timestamp = None
 
@@ -35,23 +33,17 @@ def ziskej_stav_vozidla_cached(vozidlo_id):
     """Vrátí stav vozidla s cachováním"""
     current_date = db.ziskej_datum()
     
-    # Vymaz cache pokud se změnil datum
     if _cache_timestamp != current_date:
         vymaz_cache()
     
-    # Pokud není v cache, vypočítej a ulož
     if vozidlo_id not in _cache_stavy_vozidel:
         _cache_stavy_vozidel[vozidlo_id] = logika.ziskej_stav_vozidla(vozidlo_id)
     
     return _cache_stavy_vozidel[vozidlo_id]
 
-# --- pomocne funkce ---
-
 def aktualizuj():
     """Aktualizuje hlavní seznam vozidel"""
-    datum_label.config(text=f"Datum: {db.ziskej_datum()}")
-    
-    # Vymaz cache při aktualizaci
+    datum_label.config(text=f"Datum: {db.ziskej_datum().strftime('%d-%m-%Y')}")
     vymaz_cache()
 
     for row in strom.get_children():
@@ -74,18 +66,14 @@ def aplikuj_filtr():
         strom.delete(row)
     
     for v in vsechna_vozidla:
-        # Filtruj podle typu
         if filtr_typ != "vše" and v[4] != filtr_typ:
             continue
         
-        # Použij cachovaný stav
         stav = ziskej_stav_vozidla_cached(v[0])
         
-        # Filtruj podle stavu
         if filtr_stav != "vše" and stav != filtr_stav:
             continue
         
-        # Mapování stavů na tagy
         tag_map = {
             "DEAKTIVOVANO": "dead",
             "PLANOVANY SERVIS": "planned",
@@ -112,14 +100,10 @@ def na_zmenu_stavu(event):
 def posun(dny):
     """Posune čas o zadaný počet dní - optimalizováno"""
     db.posun_dny(dny)
-    
-    # Vymaz cache
     vymaz_cache()
     
-    # Zkontroluj a zpracuj návrat vozidel z událostí
     dnes = db.ziskej_datum()
     with db.pripoj() as conn:
-        # Najdi všechny události, které končí dnes
         ukoncene_udalosti = conn.execute(
             "SELECT vozidlo_id, datum_navratu FROM MimoradnaUdalost WHERE datum_navratu = ?",
             (dnes.isoformat(),)
@@ -130,21 +114,17 @@ def posun(dny):
             datum_navratu = dt_date.fromisoformat(datum_navratu_str)
             db.zpracuj_navrat_z_udalosti(vozidlo_id, datum_navratu)
     
-    # Aktualizuj hlavní okno
     aktualizuj()
     
-    # Aktualizuj pouze viditelná detailní okna
     for vozidlo_id in list(aktualizuj_detaily_funkce.keys()):
         try:
             okno = otevena_detaily_okna.get(vozidlo_id)
             if okno and okno.winfo_exists():
                 aktualizuj_detaily_funkce[vozidlo_id]()
         except:
-            # Okno už neexistuje, odstraň z cache
             if vozidlo_id in aktualizuj_detaily_funkce:
                 del aktualizuj_detaily_funkce[vozidlo_id]
     
-    # Aktualizuj kalendář, pokud je otevřen a viditelný
     if aktualizuj_kalendar_funkce is not None:
         try:
             if otevren_kalendar and otevren_kalendar.winfo_exists():
@@ -154,7 +134,6 @@ def posun(dny):
 
 def admin_servis():
     """Admin servis - nastaví všechny komponenty všech vozidel na dnešní datum"""
-    # Potvrzovací dialog
     if not messagebox.askyesno("Admin servis", "Opravdu chceš nastavit všechny komponenty všech vozidel na dnešní servis?"):
         return
     
@@ -162,8 +141,6 @@ def admin_servis():
         dnes = db.ziskej_datum()
         
         with db.pripoj() as conn:
-            # Optimalizováno - jeden dotaz místo cyklu
-            # Aktualizuj všechny existující záznamy
             conn.execute("""
                 UPDATE ServisniZaznam
                 SET posledni_servis = ?,
@@ -185,7 +162,6 @@ def hromadny_servis_komponenty(komponenta):
         messagebox.showerror("Chyba", "Musíš vybrat komponentu!")
         return
     
-    # Potvrzovací dialog
     if not messagebox.askyesno("Hromadný servis", f"Opravdu chceš nastavit servis komponenty '{komponenta}' pro všechna vozidla?"):
         return
     
@@ -193,8 +169,6 @@ def hromadny_servis_komponenty(komponenta):
         dnes = db.ziskej_datum()
         
         with db.pripoj() as conn:
-            # Optimalizováno - UPDATE nebo INSERT v jednom dotazu pomocí UPSERT
-            # Nejdřív UPDATE existujících
             conn.execute("""
                 UPDATE ServisniZaznam
                 SET posledni_servis = ?,
@@ -202,7 +176,6 @@ def hromadny_servis_komponenty(komponenta):
                 WHERE komponenta = ?
             """, (dnes.isoformat(), komponenta))
             
-            # Pak INSERT pro vozidla, která ještě nemají záznam pro tuto komponentu
             conn.execute("""
                 INSERT INTO ServisniZaznam (vozidlo_id, komponenta, posledni_servis, posledni_servis_km)
                 SELECT v.vozidlo_id, ?, ?, v.aktualni_km
@@ -229,7 +202,6 @@ def otevri_kalendar():
     """Otevře kalendářové okno pro rezervace vozidel"""
     global otevren_kalendar, aktualizuj_kalendar_funkce
     
-    # Pokud je okno již otevřeno, dej mu focus
     if otevren_kalendar is not None:
         try:
             otevren_kalendar.lift()
@@ -248,10 +220,8 @@ def otevri_kalendar():
     kalendar_okno.title("Plánování služebních výjezdů")
     kalendar_okno.geometry("660x750")
     
-    # Zaregistruj okno
     otevren_kalendar = kalendar_okno
     
-    # Odeberi okno ze proměnné, když se zavře
     def on_closing():
         global otevren_kalendar, aktualizuj_kalendar_funkce
         otevren_kalendar = None
@@ -260,21 +230,14 @@ def otevri_kalendar():
     
     kalendar_okno.protocol("WM_DELETE_WINDOW", on_closing)
     
-    # Získej aktuální datum z databáze
-    dnes = [db.ziskej_datum()]  # Seznam pro mutabilitu
-    
-    # Proměnné pro zobrazený měsíc/rok (můžeme mezi nimi navigovat)
-    zobrazeny_mesic = [dnes[0].month]  # Seznam pro mutabilitu v nested funkci
+    dnes = [db.ziskej_datum()]
+    zobrazeny_mesic = [dnes[0].month]
     zobrazeny_rok = [dnes[0].year]
+    vybrane_dny = []
     
-    # Proměnné pro vybrané dny
-    vybrane_dny = []  # Seznam date objektů
-    
-    # Nadpis s měsícem a rokem
     mesice = ["Leden", "Únor", "Březen", "Duben", "Květen", "Červen",
               "Červenec", "Srpen", "Září", "Říjen", "Listopad", "Prosinec"]
     
-    # Frame pro osobní údaje
     osobni_udaje_frame = tk.Frame(kalendar_okno)
     osobni_udaje_frame.pack(pady=10, padx=20)
     
@@ -294,32 +257,27 @@ def otevri_kalendar():
     entry_prijmeni = tk.Entry(osobni_udaje_frame, width=15)
     entry_prijmeni.grid(row=1, column=5, padx=5)
     
-    # Frame pro výběr vozidla
     vybor_vozidla_frame = tk.Frame(kalendar_okno)
     vybor_vozidla_frame.pack(pady=15, padx=20)
     
     tk.Label(vybor_vozidla_frame, text="Vybrat vozidlo:", font=("Arial", 11, "bold")).grid(row=0, column=0, columnspan=6, sticky="w", pady=5)
     
-    # Filtr dle typu vozidla
     tk.Label(vybor_vozidla_frame, text="Typ:", font=("Arial", 10)).grid(row=1, column=0, sticky="e", padx=5)
     combo_typ_vozidla = ttk.Combobox(vybor_vozidla_frame, values=["vše", "sluzebni", "nakladni", "takticke", "bojove"], 
                                       state="readonly", width=12)
     combo_typ_vozidla.grid(row=1, column=1, padx=5)
     combo_typ_vozidla.set("vše")
     
-    # Filtr dle VPZ
     tk.Label(vybor_vozidla_frame, text="VPZ:", font=("Arial", 10)).grid(row=1, column=2, sticky="e", padx=5)
     entry_vpz_filtr = tk.Entry(vybor_vozidla_frame, width=15)
     entry_vpz_filtr.grid(row=1, column=3, padx=5)
     
-    # Výběr vozidla
     tk.Label(vybor_vozidla_frame, text="Vozidlo:", font=("Arial", 10)).grid(row=1, column=4, sticky="e", padx=5)
     combo_vozidlo = ttk.Combobox(vybor_vozidla_frame, state="readonly", width=25)
     combo_vozidlo.grid(row=1, column=5, padx=5)
     
-    # Proměnná pro uložení dat vozidel
-    vozidla_seznam = {}  # {formátovaný_text: vozidlo_id}
-    vybrane_vozidlo = [None]  # ID vybraného vozidla
+    vozidla_seznam = {}
+    vybrane_vozidlo = [None]
     
     def aktualizuj_seznam_vozidel():
         """Aktualizuje seznam vozidel podle vybraného typu a VPZ"""
@@ -348,20 +306,16 @@ def otevri_kalendar():
         for vozidlo_id, vpz, typ_vozidla, vyrobce, model in vozidla:
             stav = logika.ziskej_stav_vozidla(vozidlo_id)
             
-            # Povolit pouze DOSTUPNE nebo SLUZEBNI CESTA
             if stav not in ["DOSTUPNE", "SLUZEBNI CESTA"]:
                 continue
             
-            # Filtrování podle VPZ (pokud je zadáno)
             if vpz_filtr and vpz_filtr not in vpz.lower():
                 continue
             
-            # Formát: "značka model"
             formatovany_text = f"{vyrobce} {model}"
             dostupna_vozidla.append(formatovany_text)
             vozidla_seznam[formatovany_text] = (vozidlo_id, vpz)
         
-        # Aktualizuj combobox
         combo_vozidlo['values'] = dostupna_vozidla
         if dostupna_vozidla:
             combo_vozidlo.current(0)
@@ -382,27 +336,22 @@ def otevri_kalendar():
         """Handler pro změnu vybraného vozidla"""
         formatovany_text = combo_vozidlo.get()
         if formatovany_text in vozidla_seznam:
-            vybrane_vozidlo[0] = vozidla_seznam[formatovany_text][0]  # Získáme vozidlo_id z tuple
-            # Vyčisti vybrané dny při změně vozidla
+            vybrane_vozidlo[0] = vozidla_seznam[formatovany_text][0]
             vybrane_dny.clear()
             aktualizuj_pole_od_do()
-            # Překresli kalendář s novými obsazenými dny
             prekresli_kalendar()
     
     combo_typ_vozidla.bind("<<ComboboxSelected>>", na_zmenu_typu_vozidla)
     entry_vpz_filtr.bind("<KeyRelease>", na_zmenu_vpz)
     combo_vozidlo.bind("<<ComboboxSelected>>", na_zmenu_vozidla)
     
-    # Počáteční naplnění seznamu vozidel
     aktualizuj_seznam_vozidel()
     
-    # Frame pro účel zápůjčky
     ucel_frame = tk.Frame(kalendar_okno)
     ucel_frame.pack(pady=10, padx=20)
     
     tk.Label(ucel_frame, text="Bezservisová vyjímka pro zápůjčku:", font=("Arial", 11, "bold")).pack(anchor="w", pady=5)
     
-    # Checkboxy
     checkbox_frame = tk.Frame(ucel_frame)
     checkbox_frame.pack(anchor="w")
     
@@ -410,7 +359,6 @@ def otevri_kalendar():
     var_osobni_servis = tk.BooleanVar()
     var_delsi_14_dni = tk.BooleanVar()
     
-    # Funkce pro zajištění, že je aktivní pouze jeden checkbox
     def toggle_vycvik():
         if var_vycvik.get():
             var_osobni_servis.set(False)
@@ -430,7 +378,6 @@ def otevri_kalendar():
     tk.Checkbutton(checkbox_frame, text="Osobní servis", variable=var_osobni_servis, font=("Arial", 10), command=toggle_osobni_servis).pack(side="left", padx=10)
     tk.Checkbutton(checkbox_frame, text="Delší 14 dnů", variable=var_delsi_14_dni, font=("Arial", 10), command=toggle_delsi_14_dni).pack(side="left", padx=10)
     
-    # Frame pro navigaci
     nav_frame = tk.Frame(kalendar_okno)
     nav_frame.pack(pady=10)
     
@@ -479,19 +426,16 @@ def otevri_kalendar():
                         parent=kalendar_okno)
                     return
         
-        # Toggle výběru
         if kliknute_datum in vybrane_dny:
             vybrane_dny.remove(kliknute_datum)
         else:
             vybrane_dny.append(kliknute_datum)
         
-        # Doplň všechny dny mezi prvním a posledním vybraným
         if len(vybrane_dny) >= 2:
             vybrane_dny.sort()
             prvni_den = vybrane_dny[0]
             posledni_den = vybrane_dny[-1]
             
-            # Kontrola, zda není nějaký den v rozsahu již obsazen
             if vybrane_vozidlo[0] is not None:
                 zapujcky = db.ziskej_zapujcky_vozidla(vybrane_vozidlo[0])
                 aktualni_den = prvni_den
@@ -510,7 +454,6 @@ def otevri_kalendar():
                             return
                     aktualni_den += timedelta(days=1)
             
-            # Projdi všechny dny mezi prvním a posledním
             aktualni_den = prvni_den
             while aktualni_den <= posledni_den:
                 if aktualni_den not in vybrane_dny:
@@ -519,23 +462,15 @@ def otevri_kalendar():
             
             vybrane_dny.sort()
         
-        # Aktualizuj pole od-do
         aktualizuj_pole_od_do()
-        
-        # Překresli kalendář
         prekresli_kalendar()
     
     def prekresli_kalendar():
         """Překreslí kalendář s aktuálně zobrazovaným měsícem"""
         from datetime import date as dt_date
         
-        # Aktualizuj nadpis
         nadpis_label.config(text=f"{mesice[zobrazeny_mesic[0]-1]} {zobrazeny_rok[0]}")
-        
-        # Získej strukturu měsíce
         cal = calendar.monthcalendar(zobrazeny_rok[0], zobrazeny_mesic[0])
-        
-        # Získej zápůjčky pro vybrané vozidlo
         obsazene_dny = set()
         datum_vyprseni_servisu = None
         if vybrane_vozidlo[0] is not None:
@@ -547,64 +482,49 @@ def otevri_kalendar():
                     obsazene_dny.add(aktualni_den)
                     aktualni_den += timedelta(days=1)
             
-            # Získej datum vypršení servisu
             datum_vyprseni_servisu = logika.ziskej_datum_nejblizsiho_vyprseni_servisu(vybrane_vozidlo[0])
         
-        # Smaž staré tlačítka (pokud existují)
         for widget in kalendar_frame.winfo_children():
-            if widget.grid_info().get('row', 0) > 0:  # Nemaž hlavičku
+            if widget.grid_info().get('row', 0) > 0:
                 widget.destroy()
         
-        # Vykreslení dnů v kalendáři
         for row_idx, tyden in enumerate(cal, start=1):
             for col_idx, den in enumerate(tyden):
                 if den == 0:
-                    # Prázdné políčko (dny mimo měsíc)
                     btn = tk.Button(kalendar_frame, text="", width=6, height=2, 
                                    state="disabled", bg="#E0E0E0")
                 else:
                     datum_dne = dt_date(zobrazeny_rok[0], zobrazeny_mesic[0], den)
                     
-                    # Zkontroluj, zda je to dnešní datum
                     je_dnes = (den == dnes[0].day and 
                               zobrazeny_mesic[0] == dnes[0].month and 
                               zobrazeny_rok[0] == dnes[0].year)
-                    
-                    # Zkontroluj, zda je den vybraný
                     je_vybrany = datum_dne in vybrane_dny
-                    
-                    # Zkontroluj, zda je v minulosti
                     je_minulost = datum_dne < dnes[0]
-                    
-                    # Zkontroluj, zda je den obsazený
                     je_obsazeny = datum_dne in obsazene_dny
-                    
-                    # Zkontroluj, zda je den po vypršení servisu
                     je_po_vyprseni_servisu = False
                     if datum_vyprseni_servisu is not None and datum_dne > datum_vyprseni_servisu:
                         je_po_vyprseni_servisu = True
                     
-                    # Urči barvu a stav tlačítka
                     if je_obsazeny:
-                        barva = "#FF6B6B"  # Červená pro obsazené dny
+                        barva = "#FF6B6B"
                         state = "disabled"
                     elif je_vybrany:
-                        barva = "#90EE90"  # Zelená pro vybrané
+                        barva = "#90EE90"
                         state = "normal"
                     elif je_po_vyprseni_servisu:
-                        barva = "#FFB6B6"  # Světle červená pro dny po vypršení servisu
+                        barva = "#FFB6B6"
                         state = "normal"
                     elif je_dnes:
-                        barva = "#ADD8E6"  # Světle modrá pro dnešek
+                        barva = "#ADD8E6"
                         state = "normal"
                     elif je_minulost:
-                        barva = "#F0F0F0"  # Šedivá pro minulost
+                        barva = "#F0F0F0"
                         state = "normal"
                     else:
                         barva = "white"
                         state = "normal"
                     
-                    # Den v měsíci
                     btn = tk.Button(kalendar_frame, text=str(den), width=6, height=2,
                                    bg=barva, relief="raised", state=state,
                                    command=lambda d=den, m=zobrazeny_mesic[0], r=zobrazeny_rok[0]: klikni_na_den(d, m, r))
@@ -614,7 +534,6 @@ def otevri_kalendar():
     def aktualizuj_kalendar_z_venci():
         """Aktualizuje kalendář při změně simulovaného data"""
         dnes[0] = db.ziskej_datum()
-        # Přepni zobrazený měsíc/rok na aktuální datum
         zobrazeny_mesic[0] = dnes[0].month
         zobrazeny_rok[0] = dnes[0].year
         prekresli_kalendar()
@@ -635,7 +554,6 @@ def otevri_kalendar():
             zobrazeny_rok[0] += 1
         prekresli_kalendar()
     
-    # Tlačítka pro navigaci
     btn_predchozi = tk.Button(nav_frame, text="◄", command=predchozi_mesic, 
                              font=("Arial", 14, "bold"), width=3)
     btn_predchozi.pack(side="left", padx=10)
@@ -646,17 +564,14 @@ def otevri_kalendar():
                                 font=("Arial", 14, "bold"), width=3)
     btn_nasledujici.pack(side="left", padx=10)
     
-    # Frame pro kalendář
     kalendar_frame = tk.Frame(kalendar_okno)
     kalendar_frame.pack(padx=20, pady=10)
     
-    # Hlavička - dny v týdnu
     dny_tydne = ["Po", "Út", "St", "Čt", "Pá", "So", "Ne"]
     for col, den in enumerate(dny_tydne):
         label = tk.Label(kalendar_frame, text=den, font=("Arial", 10, "bold"), width=8)
         label.grid(row=0, column=col, padx=2, pady=2)
     
-    # Frame pro vybrané dny
     vybrane_frame = tk.Frame(kalendar_okno)
     vybrane_frame.pack(pady=20, padx=20)
     
@@ -670,7 +585,6 @@ def otevri_kalendar():
     entry_do = tk.Entry(vybrane_frame, width=15, font=("Arial", 10), state="readonly")
     entry_do.grid(row=1, column=3, padx=5)
     
-    # Funkce pro potvrzení zápůjčky
     def potvrdit_zapujcku():
         """Uloží zápůjčku do databáze"""
         if vybrane_vozidlo[0] is None:
@@ -681,12 +595,10 @@ def otevri_kalendar():
             messagebox.showerror("Chyba", "Nejsou vybrány žádné dny!", parent=kalendar_okno)
             return
         
-        # Seřaď vybrané dny
         vybrane_dny.sort()
         datum_od = vybrane_dny[0]
         datum_do = vybrane_dny[-1]
         
-        # Získej VPZ vybraného vozidla
         formatovany_text = combo_vozidlo.get()
         if formatovany_text in vozidla_seznam:
             vozidlo_id, vpz = vozidla_seznam[formatovany_text]
@@ -694,17 +606,14 @@ def otevri_kalendar():
             messagebox.showerror("Chyba", "Nepodařilo se určit vozidlo!", parent=kalendar_okno)
             return
         
-        # Kontrola platnosti servisu podle účelu
         je_vycvik = var_vycvik.get()
         je_osobni_servis = var_osobni_servis.get()
         je_delsi_14_dni = var_delsi_14_dni.get()
         
-        # Pokud není zaškrtnut "Osobní servis", kontroluj platnost
         if not je_osobni_servis:
             je_ok, problemy = logika.kontrola_platnosti_servisu_do_data(vybrane_vozidlo[0], datum_do)
             
             if not je_ok:
-                # Pokud je výcvik NEBO delší než 14 dní, povolíme to s upozorněním
                 if je_vycvik or je_delsi_14_dni:
                     typ_cesty = "výcvik" if je_vycvik else "cesta delší než 14 dní"
                     odpoved = messagebox.askyesno(
@@ -726,7 +635,6 @@ def otevri_kalendar():
                     )
                     return
         
-        # Uložení do databáze
         try:
             db.vytvor_zapujcku(vybrane_vozidlo[0], datum_od, datum_do)
             messagebox.showinfo("Úspěch", 
@@ -735,28 +643,19 @@ def otevri_kalendar():
                 f"Datum: {datum_od.strftime('%d.%m.%Y')} - {datum_do.strftime('%d.%m.%Y')}",
                 parent=kalendar_okno)
             
-            # Vyčisti vybrané dny
             vybrane_dny.clear()
             aktualizuj_pole_od_do()
-            
-            # Překresli kalendář
             prekresli_kalendar()
-            
-            # Aktualizuj hlavní okno
             aktualizuj()
         except Exception as e:
             messagebox.showerror("Chyba", f"Nepodařilo se vytvořit zápůjčku:\n{e}", parent=kalendar_okno)
     
-    # Tlačítko pro potvrzení
     btn_potvrdit = tk.Button(vybrane_frame, text="Potvrdit zápůjčku", 
                             command=potvrdit_zapujcku, bg="#D3D3D3", 
                             font=("Arial", 11, "bold"), width=20, height=2)
     btn_potvrdit.grid(row=2, column=0, columnspan=4, pady=15)
     
-    # První vykreslení kalendáře
     prekresli_kalendar()
-    
-    # Zaregistruj funkci pro aktualizaci zvenčí
     aktualizuj_kalendar_funkce = aktualizuj_kalendar_z_venci
 
 def otevri_mimoradnou_udalost():
@@ -765,14 +664,11 @@ def otevri_mimoradnou_udalost():
     udalost_okno.title("Hlášení mimořádné události")
     udalost_okno.geometry("500x570")
     
-    # Hlavní nadpis
     tk.Label(udalost_okno, text="Hlášení mimořádné události", font=("Arial", 14, "bold")).pack(pady=10)
     
-    # Frame pro formulář
     form_frame = tk.Frame(udalost_okno)
     form_frame.pack(pady=10, padx=20, fill="both")
     
-    # Osobní údaje
     tk.Label(form_frame, text="Osobní údaje hlasitele:", font=("Arial", 11, "bold")).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
     
     tk.Label(form_frame, text="Hodnost:", font=("Arial", 10)).grid(row=1, column=0, sticky="e", padx=5, pady=5)
@@ -789,26 +685,23 @@ def otevri_mimoradnou_udalost():
     entry_prijmeni = tk.Entry(form_frame, width=30)
     entry_prijmeni.grid(row=3, column=1, padx=5, pady=5)
     
-    # Datum a čas
     tk.Label(form_frame, text="Datum a čas události:", font=("Arial", 11, "bold")).grid(row=4, column=0, columnspan=2, sticky="w", pady=(15, 10))
     
     tk.Label(form_frame, text="Datum:", font=("Arial", 10)).grid(row=5, column=0, sticky="e", padx=5, pady=5)
     datum_frame = tk.Frame(form_frame)
     datum_frame.grid(row=5, column=1, sticky="w", padx=5, pady=5)
     
-    # Získej aktuální datum
     dnes = db.ziskej_datum()
     
-    # Vytvoř combobox s možnými daty (dnes ±3 dny)
     from datetime import timedelta
     mozne_dny = []
-    for i in range(-3, 4):  # -3 až +3 dny
+    for i in range(-3, 4):
         datum = dnes + timedelta(days=i)
         mozne_dny.append(datum.strftime('%d.%m.%Y'))
     
     combo_datum = ttk.Combobox(datum_frame, values=mozne_dny, state="readonly", width=15)
     combo_datum.pack(side="left", padx=2)
-    combo_datum.current(3)  # Nastav na dnes (index 3)
+    combo_datum.current(3)
     
     tk.Label(form_frame, text="Čas:", font=("Arial", 10)).grid(row=6, column=0, sticky="e", padx=5, pady=5)
     cas_frame = tk.Frame(form_frame)
@@ -820,20 +713,17 @@ def otevri_mimoradnou_udalost():
     spinbox_minuta = tk.Spinbox(cas_frame, from_=0, to=59, width=5, format="%02.0f")
     spinbox_minuta.pack(side="left", padx=2)
     
-    # Typ události
     tk.Label(form_frame, text="Typ události:", font=("Arial", 11, "bold")).grid(row=7, column=0, columnspan=2, sticky="w", pady=(15, 10))
     
     var_nehoda = tk.BooleanVar()
     tk.Checkbutton(form_frame, text="Nehoda", variable=var_nehoda, font=("Arial", 10)).grid(row=8, column=0, columnspan=2, sticky="w", padx=5, pady=5)
     
-    # Výběr vozidla
     tk.Label(form_frame, text="Vozidlo:", font=("Arial", 11, "bold")).grid(row=9, column=0, columnspan=2, sticky="w", pady=(15, 10))
     
     tk.Label(form_frame, text="Vyberte vozidlo:", font=("Arial", 10)).grid(row=10, column=0, sticky="e", padx=5, pady=5)
     combo_vozidlo = ttk.Combobox(form_frame, state="readonly", width=30)
     combo_vozidlo.grid(row=10, column=1, padx=5, pady=5)
     
-    # Načti dostupná a vypůjčená vozidla
     vozidla_seznam = {}
     with db.pripoj() as conn:
         vozidla = conn.execute("""
@@ -854,9 +744,7 @@ def otevri_mimoradnou_udalost():
     if dostupna_vozidla:
         combo_vozidlo.current(0)
     
-    # Funkce pro potvrzení
     def potvrdit_udalost():
-        # Validace
         if not entry_jmeno.get() or not entry_prijmeni.get():
             messagebox.showerror("Chyba", "Vyplňte jméno a příjmení!", parent=udalost_okno)
             return
@@ -872,12 +760,10 @@ def otevri_mimoradnou_udalost():
         try:
             from datetime import date as dt_date, timedelta
             
-            # Parsuj datum z comboboxu
             vybrany_text = combo_datum.get()
             den, mesic, rok = vybrany_text.split('.')
             datum_udalosti = dt_date(int(rok), int(mesic), int(den))
             
-            # Vytvoř událost
             formatovany_text = combo_vozidlo.get()
             vozidlo_id = vozidla_seznam[formatovany_text]
             
@@ -890,16 +776,12 @@ def otevri_mimoradnou_udalost():
                 f"Předpokládaný návrat: {(datum_udalosti + db.timedelta(days=4)).strftime('%d.%m.%Y')}",
                 parent=udalost_okno)
             
-            # Aktualizuj hlavní okno
             aktualizuj()
-            
-            # Zavři formulář
             udalost_okno.destroy()
             
         except Exception as e:
             messagebox.showerror("Chyba", f"Nepodařilo se vytvořit událost:\n{e}", parent=udalost_okno)
     
-    # Tlačítka
     btn_frame = tk.Frame(udalost_okno)
     btn_frame.pack(pady=20)
     
@@ -911,7 +793,6 @@ def otevri_mimoradnou_udalost():
 def otevri_admin_panel():
     global otevren_admin_panel
     
-    # Pokud je okno již otevřeno, dej mu focus
     if otevren_admin_panel is not None:
         try:
             otevren_admin_panel.lift()
@@ -921,19 +802,15 @@ def otevri_admin_panel():
         else:
             return
     
-    # Označit, že se okno vytváří
     class Sentinel: pass
     otevren_admin_panel = Sentinel()
     
-    # Vytvoří nové okno pro admin panel
     admin_okno = tk.Toplevel(okno)
     admin_okno.title("Panel dozorčího vozového parku")
     admin_okno.geometry("400x500")
     
-    # Zaregistruj okno
     otevren_admin_panel = admin_okno
     
-    # Odeberi okno ze proměnné, když se zavře
     def on_closing():
         global otevren_admin_panel
         otevren_admin_panel = None
@@ -941,11 +818,9 @@ def otevri_admin_panel():
     
     admin_okno.protocol("WM_DELETE_WINDOW", on_closing)
     
-    # Nadpis
     nadpis = tk.Label(admin_okno, text="Panel dozorčího vozového parku", font=("Arial", 14, "bold"))
     nadpis.pack(pady=15)
     
-    # Sekce - Simulace času
     frame_cas = ttk.LabelFrame(admin_okno, text="Simulace času", padding=15)
     frame_cas.pack(fill="x", padx=20, pady=10)
     
@@ -958,7 +833,6 @@ def otevri_admin_panel():
     tk.Button(frame_cas_tlacitka, text="+7 dní", command=lambda: posun(7), bg="#D3D3D3", width=12).pack(side="left", padx=5)
     tk.Button(frame_cas_tlacitka, text="+30 dní", command=lambda: posun(30), bg="#D3D3D3", width=12).pack(side="left", padx=5)
     
-    # Sekce - Hromadný servis
     frame_servis = ttk.LabelFrame(admin_okno, text="Hromadný servis", padding=15)
     frame_servis.pack(fill="x", padx=20, pady=10)
     
@@ -966,7 +840,6 @@ def otevri_admin_panel():
     
     tk.Button(frame_servis, text="Provést hromadný servis", command=admin_servis, bg="#D3D3D3", width=30).pack(pady=5)
     
-    # Sekce - Hromadný servis jednotlivé komponenty
     frame_servis_komponenta = ttk.LabelFrame(admin_okno, text="Hromadný servis komponenty", padding=15)
     frame_servis_komponenta.pack(fill="x", padx=20, pady=10)
     
@@ -987,11 +860,9 @@ def otevri_detaily_vozidla(event):
     if not selected:
         return
     
-    # Ziskej VPZ vybraneho vozidla
     item = selected[0]
     vpz = strom.item(item, "values")[0]
     
-    # Ziskej vozidlo_id podle VPZ
     with db.pripoj() as conn:
         vozidlo = conn.execute(
             "SELECT vozidlo_id, vpz, vyrobce, model, typ_vozidla, vin FROM Vozidlo WHERE vpz=?",
@@ -1123,15 +994,15 @@ def otevri_detaily_vozidla(event):
         ttk.Label(frame_data, text="Datum servisu:").grid(row=0, column=0, sticky="w", pady=5)
         entry_datum = ttk.Entry(frame_data, width=30)
         entry_datum.grid(row=0, column=1, pady=5)
-        entry_datum.insert(0, db.ziskej_datum().isoformat())
+        entry_datum.insert(0, db.ziskej_datum().strftime('%d-%m-%Y'))
         
-        ttk.Label(frame_data, text="(formát: YYYY-MM-DD)").grid(row=1, column=1, sticky="w")
+        ttk.Label(frame_data, text="(formát: DD-MM-YYYY)").grid(row=1, column=1, sticky="w")
         
         def provest_servis():
             try:
                 dnes = db.ziskej_datum()
                 logika.zapis_servis(vozidlo_id, komponenta)
-                messagebox.showinfo("Úspěch", f"Servis {komponenta} proveden na {dnes.isoformat()}")
+                messagebox.showinfo("Úspěch", f"Servis {komponenta} proveden na {dnes.strftime('%d-%m-%Y')}")
                 aktualizuj_detaily()
                 aktualizuj()  # Obnovit hlavní okno
                 servis_okno.destroy()
@@ -1141,7 +1012,7 @@ def otevri_detaily_vozidla(event):
         def naplanovani_servis():
             try:
                 datum_str = entry_datum.get().strip()
-                datum = __import__('datetime').date.fromisoformat(datum_str)
+                datum = __import__('datetime').datetime.strptime(datum_str, '%d-%m-%Y').date()
                 aktualni_km = db.ziskej_km_vozidla(vozidlo_id)
                 
                 with db.pripoj() as conn:
@@ -1165,12 +1036,12 @@ def otevri_detaily_vozidla(event):
                     
                     conn.commit()
                 
-                messagebox.showinfo("Úspěch", f"Servis {komponenta} naplánován na {datum.isoformat()}")
+                messagebox.showinfo("Úspěch", f"Servis {komponenta} naplánován na {datum.strftime('%d-%m-%Y')}")
                 aktualizuj_detaily()
                 aktualizuj()  # Obnovit hlavní okno
                 servis_okno.destroy()
             except ValueError:
-                messagebox.showerror("Chyba", "Neplatný formát data! Použij YYYY-MM-DD")
+                messagebox.showerror("Chyba", "Neplatný formát data! Použij DD-MM-YYYY")
             except Exception as e:
                 messagebox.showerror("Chyba", f"Chyba: {str(e)}")
         
@@ -1197,7 +1068,7 @@ def otevri_detaily_vozidla(event):
             
             if posledni:
                 posledni_datum, posledni_km = posledni
-                posledni_text = posledni_datum.isoformat()
+                posledni_text = posledni_datum.strftime('%d-%m-%Y')
             else:
                 posledni_datum = None
                 posledni_text = "Nikdy"
@@ -1329,17 +1200,14 @@ def otevri_pridani_vozidla():
     entry_barva = ttk.Entry(frame_form, width=40)
     entry_barva.grid(row=5, column=1, pady=5)
     
-    # Počet kol
     ttk.Label(frame_form, text="Počet kol:").grid(row=6, column=0, sticky="w", pady=5)
     entry_kola = ttk.Entry(frame_form, width=40)
     entry_kola.grid(row=6, column=1, pady=5)
     
-    # Rok
     ttk.Label(frame_form, text="Rok:").grid(row=7, column=0, sticky="w", pady=5)
     entry_rok = ttk.Entry(frame_form, width=40)
     entry_rok.grid(row=7, column=1, pady=5)
     
-    # Najeté kilometry
     ttk.Label(frame_form, text="Najeté km:").grid(row=8, column=0, sticky="w", pady=5)
     entry_km = ttk.Entry(frame_form, width=40)
     entry_km.grid(row=8, column=1, pady=5)
@@ -1356,12 +1224,10 @@ def otevri_pridani_vozidla():
             rok = int(entry_rok.get().strip()) if entry_rok.get().strip() else None
             aktualni_km = int(entry_km.get().strip()) if entry_km.get().strip() else 0
             
-            # Validace základních polí
             if not vin or not vpz or not vyrobce or not model or not typ_vozidla:
                 tk.messagebox.showerror("Chyba", "Všechna povinná pole musí být vyplněna!", parent=pridani_okno)
                 return
             
-            # Validace VIN - 17 znaků, pouze A-Z a 0-9
             import re
             if len(vin) != 17:
                 tk.messagebox.showerror("Chyba", "VIN musí mít přesně 17 znaků!", parent=pridani_okno)
@@ -1370,12 +1236,10 @@ def otevri_pridani_vozidla():
                 tk.messagebox.showerror("Chyba", "VIN může obsahovat pouze velká písmena (A-Z) a číslice (0-9)!", parent=pridani_okno)
                 return
             
-            # Validace VPZ - formát xxx xx-xx, pouze číslice
             if not re.match(r'^[0-9]{3} [0-9]{2}-[0-9]{2}$', vpz):
                 tk.messagebox.showerror("Chyba", "VPZ musí být ve formátu 'xxx xx-xx' a obsahovat pouze číslice (např. '212 97-56')!", parent=pridani_okno)
                 return
             
-            # Kontrola jedinečnosti VIN a VPZ
             with db.pripoj() as conn:
                 existujici_vin = conn.execute("SELECT COUNT(*) FROM Vozidlo WHERE vin = ?", (vin,)).fetchone()[0]
                 if existujici_vin > 0:
@@ -1387,7 +1251,6 @@ def otevri_pridani_vozidla():
                     tk.messagebox.showerror("Chyba", "Vozidlo s tímto VPZ již existuje!", parent=pridani_okno)
                     return
                 
-                # Vlož do databáze
                 conn.execute("""
                     INSERT INTO Vozidlo (vin, vpz, vyrobce, model, typ_vozidla, barva, pocet_kol, rok, aktualni_km)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1396,7 +1259,6 @@ def otevri_pridani_vozidla():
             
             tk.messagebox.showinfo("Úspěch", "Vozidlo bylo úspěšně přidáno!", parent=pridani_okno)
             
-            # Uzavři okno a aktualizuj seznam
             pridani_okno.destroy()
             aktualizuj()
         except ValueError:
@@ -1404,14 +1266,11 @@ def otevri_pridani_vozidla():
         except Exception as e:
             tk.messagebox.showerror("Chyba", f"Chyba při ukládání: {str(e)}", parent=pridani_okno)
     
-    # Tlačítka
     frame_buttons = ttk.Frame(pridani_okno)
     frame_buttons.pack(pady=10)
     
     tk.Button(frame_buttons, text="Uložit", command=ulozit_vozidlo, bg="#b7f7b7", width=15).pack(side="left", padx=5)
     tk.Button(frame_buttons, text="Zrušit", command=pridani_okno.destroy, bg="#f7b7b7", width=15).pack(side="left", padx=5)
-
-# --- okno ---
 
 okno = tk.Tk()
 okno.title("Databáze vozového parku")
@@ -1420,7 +1279,6 @@ okno.geometry("1050x600")
 datum_label = tk.Label(okno, font=("Arial", 14))
 datum_label.pack(pady=10)
 
-# --- tlačítka ---
 frame_buttons = tk.Frame(okno)
 frame_buttons.pack()
 
@@ -1430,7 +1288,6 @@ tk.Button(frame_buttons, text="Plán výjezdů", command=otevri_kalendar, bg="#D
 tk.Button(frame_buttons, text="Mimořádná událost", command=otevri_mimoradnou_udalost, bg="#D3D3D3", width=18).pack(side="left", padx=5)
 tk.Button(frame_buttons, text="Zavřít databázi", command=zavrit_databazi, bg="#f7b7b7", width=15).pack(side="left", padx=5)
 
-# --- filtr typu a stavu ---
 frame_filtr = tk.Frame(okno)
 frame_filtr.pack(pady=5)
 
@@ -1446,7 +1303,6 @@ combo_stav.pack(side="left", padx=5)
 combo_stav.set("vše")
 combo_stav.bind("<<ComboboxSelected>>", na_zmenu_stavu)
 
-# --- tabulka ---
 strom = ttk.Treeview(okno, columns=("vpz", "vyrobce", "model", "typ", "stav"), show="headings")
 
 strom.heading("vpz", text="VPZ")
@@ -1465,7 +1321,6 @@ strom.tag_configure("dead", background="#D3D3D3")
 
 strom.pack(fill="both", expand=True, padx=10, pady=10)
 
-# Event na dvojklik
 strom.bind("<Double-1>", otevri_detaily_vozidla)
 
 aktualizuj()

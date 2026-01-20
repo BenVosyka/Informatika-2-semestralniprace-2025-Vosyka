@@ -13,13 +13,21 @@ def inicializuj_db():
         conn.executescript(sql)
         conn.commit()
     
-    # Vždy nastav dnešní datum při spuštění
-    nastav_datum(date.today())
+    # Nastav datum pouze pokud ještě není v databázi (nová instalace)
+    with pripoj() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT aktualni_datum FROM SystemCas WHERE id=1")
+        result = cur.fetchone()
+        
+        # Pokud záznam neexistuje, vytvoř ho s dnešním datem
+        if not result:
+            conn.execute(
+                "INSERT INTO SystemCas (id, aktualni_datum) VALUES (1, ?)",
+                (date.today().strftime("%Y-%m-%d"),)
+            )
+            conn.commit()
     
-    # Zpracuj vstupní servisy - rozšíř je na všechny komponenty
     zpracuj_vstupni_servisy()
-
-# --- SIMULOVANY CAS ---
 
 def ziskej_datum():
     with pripoj() as conn:
@@ -37,8 +45,6 @@ def nastav_datum(nove_datum):
 def posun_dny(dny):
     dnes = ziskej_datum()
     nastav_datum(dnes + timedelta(days=dny))
-
-# --- KILOMETRAZE ---
 
 def ziskej_km_vozidla(vozidlo_id):
     """Vrátí aktuální kilometrážní stav vozidla"""
@@ -77,27 +83,22 @@ def zpracuj_vstupni_servisy():
     import logika
     
     with pripoj() as conn:
-        # Ziskej všechny vstupní servisy
         vstupni = conn.execute("SELECT vozidlo_id, vstupni_datum FROM VstupniServis").fetchall()
         
         for vozidlo_id, vstupni_datum in vstupni:
-            # Ziskej typ vozidla a aktuální km
             vozidlo_data = conn.execute(
                 "SELECT typ_vozidla, aktualni_km FROM Vozidlo WHERE vozidlo_id=?",
                 (vozidlo_id,)
             ).fetchone()
             typ_vozidla, aktualni_km = vozidlo_data
             
-            # Pro každou komponentu
             for komponenta in logika.KOMPONENTY:
-                # Zkontroluj, zda už existuje záznam
                 existing = conn.execute(
                     "SELECT zaznam_id FROM ServisniZaznam WHERE vozidlo_id=? AND komponenta=?",
                     (vozidlo_id, komponenta)
                 ).fetchone()
                 
                 if not existing:
-                    # Vytvoř nový záznam s vstupním datem a km
                     conn.execute(
                         "INSERT INTO ServisniZaznam (vozidlo_id, komponenta, posledni_servis, posledni_servis_km) VALUES (?, ?, ?, ?)",
                         (vozidlo_id, komponenta, vstupni_datum, aktualni_km)
@@ -105,15 +106,12 @@ def zpracuj_vstupni_servisy():
         
         conn.commit()
 
-
-# --- ZAPUJCKY ---
-
 def vytvor_zapujcku(vozidlo_id, datum_od, datum_do):
     """Vytvoří novou zápůjčku vozidla"""
     with pripoj() as conn:
         conn.execute(
             "INSERT INTO Zapujcka (vozidlo_id, datum_od, datum_do) VALUES (?, ?, ?)",
-            (vozidlo_id, datum_od.isoformat(), datum_do.isoformat())
+            (vozidlo_id, datum_od.strftime("%d-%m-%Y"), datum_do.strftime("%d-%m-%Y"))
         )
         conn.commit()
 
@@ -127,7 +125,7 @@ def ziskej_zapujcky_vozidla(vozidlo_id):
         )
         result = []
         for row in cur.fetchall():
-            result.append((row[0], date.fromisoformat(row[1]), date.fromisoformat(row[2])))
+            result.append((row[0], datetime.strptime(row[1], "%d-%m-%Y").date(), datetime.strptime(row[2], "%d-%m-%Y").date()))
         return result
 
 def je_vozidlo_zapujcene(vozidlo_id, kontrolni_datum=None):
@@ -141,9 +139,6 @@ def je_vozidlo_zapujcene(vozidlo_id, kontrolni_datum=None):
             return True
     return False
 
-
-# --- MIMORADNE UDALOSTI ---
-
 def vytvor_udalost(vozidlo_id, datum_hlaseni):
     """Vytvoří mimořádnou událost a nastaví datum návratu (hlášení + 4 dny)"""
     from datetime import timedelta
@@ -152,7 +147,7 @@ def vytvor_udalost(vozidlo_id, datum_hlaseni):
     with pripoj() as conn:
         conn.execute(
             "INSERT INTO MimoradnaUdalost (vozidlo_id, datum_hlaseni, datum_navratu) VALUES (?, ?, ?)",
-            (vozidlo_id, datum_hlaseni.isoformat(), datum_navratu.isoformat())
+            (vozidlo_id, datum_hlaseni.strftime("%d-%m-%Y"), datum_navratu.strftime("%d-%m-%Y"))
         )
         conn.commit()
 
@@ -169,11 +164,11 @@ def ziskej_aktivni_udalost(vozidlo_id, kontrolni_datum=None):
                WHERE vozidlo_id = ? AND datum_hlaseni <= ? AND datum_navratu > ?
                ORDER BY datum_hlaseni DESC
                LIMIT 1""",
-            (vozidlo_id, kontrolni_datum.isoformat(), kontrolni_datum.isoformat())
+            (vozidlo_id, kontrolni_datum.strftime("%d-%m-%Y"), kontrolni_datum.strftime("%d-%m-%Y"))
         )
         row = cur.fetchone()
         if row:
-            return (date.fromisoformat(row[0]), date.fromisoformat(row[1]))
+            return (datetime.strptime(row[0], "%d-%m-%Y").date(), datetime.strptime(row[1], "%d-%m-%Y").date())
         return None
 
 def zpracuj_navrat_z_udalosti(vozidlo_id, datum_navratu):
@@ -181,22 +176,18 @@ def zpracuj_navrat_z_udalosti(vozidlo_id, datum_navratu):
     import logika
     
     with pripoj() as conn:
-        # Získej typ vozidla
         cur = conn.cursor()
         cur.execute("SELECT typ_vozidla FROM Vozidlo WHERE vozidlo_id=?", (vozidlo_id,))
         result = cur.fetchone()
         if not result:
             return
         typ_vozidla = result[0]
-        
-        # Získej aktuální km
         aktualni_km = ziskej_km_vozidla(vozidlo_id)
         
-        # Proveď servis všech komponent
         for komponenta in logika.KOMPONENTY:
             conn.execute(
                 "INSERT INTO ServisniZaznam (vozidlo_id, komponenta, posledni_servis, posledni_servis_km) VALUES (?, ?, ?, ?)",
-                (vozidlo_id, komponenta, datum_navratu.isoformat(), aktualni_km)
+                (vozidlo_id, komponenta, datum_navratu.strftime("%d-%m-%Y"), aktualni_km)
             )
         
         conn.commit()

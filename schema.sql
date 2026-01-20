@@ -3,9 +3,6 @@ CREATE TABLE IF NOT EXISTS SystemCas (
     aktualni_datum TEXT NOT NULL
 );
 
-INSERT OR IGNORE INTO SystemCas (id, aktualni_datum)
-VALUES (1, '2026-01-01');
-
 CREATE TABLE IF NOT EXISTS Vozidlo (
     vozidlo_id INTEGER PRIMARY KEY AUTOINCREMENT,
     vin TEXT UNIQUE NOT NULL,
@@ -56,7 +53,6 @@ CREATE TABLE IF NOT EXISTS ZivotnostVozidla (
     zivotnost_km INTEGER NOT NULL
 );
 
--- Testovací data
 INSERT OR IGNORE INTO Vozidlo (vozidlo_id, vin, vpz, vyrobce, model, typ_vozidla, barva, pocet_kol, rok, aktualni_km)
 VALUES 
     (1, 'TMBABCDEF3H123456', '212 97-56', 'Toyota'    , 'Hilux'    , 'sluzebni', 'zelena' , 4, 2022, 1050000),
@@ -136,7 +132,6 @@ VALUES
     ('bojove', 'olej', 10),
     ('bojove', 'chladici kapalina', 30);
 
--- Kilometrážní pravidla
 INSERT OR IGNORE INTO KilometrovePravidlo (typ_vozidla, komponenta, interval_km)
 VALUES 
     ('sluzebni', 'motor', 50000),
@@ -183,7 +178,6 @@ VALUES
     ('bojove', 'olej', 3000),
     ('bojove', 'chladici kapalina', 7500);
 
--- Životnost vozidel
 INSERT OR IGNORE INTO ZivotnostVozidla (typ_vozidla, zivotnost_km)
 VALUES 
     ('sluzebni', 1000000),
@@ -224,7 +218,6 @@ VALUES
     (29, '2025-11-24'),
     (30, '2025-12-16');
 
--- Tabulka pro zápůjčky vozidel
 CREATE TABLE IF NOT EXISTS Zapujcka (
     zapujcka_id INTEGER PRIMARY KEY AUTOINCREMENT,
     vozidlo_id INTEGER NOT NULL,
@@ -233,7 +226,6 @@ CREATE TABLE IF NOT EXISTS Zapujcka (
     FOREIGN KEY (vozidlo_id) REFERENCES Vozidlo(vozidlo_id)
 );
 
--- Tabulka pro mimořádné události
 CREATE TABLE IF NOT EXISTS MimoradnaUdalost (
     udalost_id INTEGER PRIMARY KEY AUTOINCREMENT,
     vozidlo_id INTEGER NOT NULL,
@@ -242,7 +234,6 @@ CREATE TABLE IF NOT EXISTS MimoradnaUdalost (
     FOREIGN KEY (vozidlo_id) REFERENCES Vozidlo(vozidlo_id)
 );
 
--- Indexy pro optimalizaci výkonu
 CREATE INDEX IF NOT EXISTS idx_servisni_zaznam_vozidlo_komponenta 
     ON ServisniZaznam(vozidlo_id, komponenta);
 
